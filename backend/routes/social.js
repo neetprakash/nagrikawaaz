@@ -273,8 +273,210 @@ router.get('/messages', authRequired, requireVerified, (req, res) => {
   res.json({ messages });
 });
 
-// Send a message. The connection gate is the only authorization — if the two
-// users are connected, the message is allowed regardless of role.
+// Aggregated activity feed for the bell-icon dropdown on the nav bar. Combines
+// incoming connection requests, acceptances, new posts by the caller's
+// connections, and new posts in the caller's constituency from non-connected
+// citizens (so the feed doubles as a local discovery surface). Read/unread state
+// is tracked client-side in localStorage for the MVP — we don't need a
+// notifications table for that yet.
+router.get('/notifications', authRequired, (req, res) => {
+  const SINCE_DAYS = 7;
+  const SINCE = new Date(Date.now() - SINCE_DAYS * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+  const me = req.user.id;
+
+  const connectionIds = db
+    .prepare(
+      `SELECT CASE WHEN requester_id = ? THEN addressee_id ELSE requester_id END as other
+       FROM connection_requests
+       WHERE status = 'accepted' AND (requester_id = ? OR addressee_id = ?)`
+    )
+    .all(me, me, me)
+    .map((r) => r.other);
+
+  const items = [];
+
+  // 1. Pending incoming connection requests
+  const pendingRows = db
+    .prepare(
+      `SELECT cr.id as request_id, cr.created_at,
+              u.id, u.name, u.phone, u.avatar_url, u.role, u.verified, u.constituency_id
+       FROM connection_requests cr
+       JOIN users u ON u.id = cr.requester_id
+       WHERE cr.addressee_id = ? AND cr.status = 'pending'`
+    )
+    .all(me);
+  for (const r of pendingRows) {
+    items.push({
+      id: `cr-${r.request_id}`,
+      type: 'connection_request',
+      actor: publicUser(r),
+      verb: 'requested to connect with you',
+      target_type: 'user',
+      target_id: r.id,
+      target_url: `/inbox/${r.id}`,
+      context_title: null,
+      created_at: r.created_at,
+    });
+  }
+
+  // 2. Recent acceptances (someone accepted my request)
+  if (connectionIds.length > 0) {
+    const acceptedRows = db
+      .prepare(
+        `SELECT cr.id, cr.updated_at as created_at,
+                u.id, u.name, u.phone, u.avatar_url, u.role, u.verified, u.constituency_id
+         FROM connection_requests cr
+         JOIN users u ON u.id = cr.addressee_id
+         WHERE cr.requester_id = ? AND cr.status = 'accepted' AND cr.updated_at >= ?
+         ORDER BY cr.updated_at DESC
+         LIMIT 25`
+      )
+      .all(me, SINCE);
+    for (const r of acceptedRows) {
+      items.push({
+        id: `accepted-${r.id}`,
+        type: 'connection_accepted',
+        actor: publicUser(r),
+        verb: 'accepted your connection request',
+        target_type: 'user',
+        target_id: r.id,
+        target_url: `/inbox/${r.id}`,
+        context_title: null,
+        created_at: r.created_at,
+      });
+    }
+  }
+
+  // 3. New issues by connections
+  if (connectionIds.length > 0) {
+    const placeholders = connectionIds.map(() => '?').join(',');
+    const issueRows = db
+      .prepare(
+        `SELECT issues.id, issues.title, issues.created_at,
+                users.id as uid, users.name, users.phone, users.avatar_url,
+                users.role, users.verified, users.constituency_id
+         FROM issues
+         JOIN users ON users.id = issues.user_id
+         WHERE issues.user_id IN (${placeholders}) AND issues.created_at >= ?
+         ORDER BY issues.created_at DESC LIMIT 25`
+      )
+      .all(...connectionIds, SINCE);
+    for (const i of issueRows) {
+      items.push({
+        id: `issue-${i.id}`,
+        type: 'new_issue',
+        actor: publicUser({ id: i.uid, name: i.name, phone: i.phone, avatar_url: i.avatar_url, role: i.role, verified: i.verified, constituency_id: i.constituency_id }),
+        verb: 'raised a new issue',
+        target_type: 'issue',
+        target_id: i.id,
+        target_url: `/issues/${i.id}`,
+        context_title: i.title,
+        created_at: i.created_at,
+      });
+    }
+
+    // 4. New comments by connections on any issue
+    const commentRows = db
+      .prepare(
+        `SELECT c.id, c.issue_id, c.created_at, c.body,
+                i.title as issue_title,
+                users.id as uid, users.name, users.phone, users.avatar_url,
+                users.role, users.verified, users.constituency_id
+         FROM comments c
+         JOIN users ON users.id = c.user_id
+         JOIN issues i ON i.id = c.issue_id
+         WHERE c.user_id IN (${placeholders}) AND c.created_at >= ?
+         ORDER BY c.created_at DESC LIMIT 25`
+      )
+      .all(...connectionIds, SINCE);
+    for (const c of commentRows) {
+      items.push({
+        id: `comment-${c.id}`,
+        type: 'new_comment',
+        actor: publicUser({ id: c.uid, name: c.name, phone: c.phone, avatar_url: c.avatar_url, role: c.role, verified: c.verified, constituency_id: c.constituency_id }),
+        verb: 'commented on',
+        target_type: 'issue',
+        target_id: c.issue_id,
+        target_url: `/issues/${c.issue_id}`,
+        context_title: c.issue_title,
+        created_at: c.created_at,
+      });
+    }
+
+    // 5. New polls by connections
+    const pollRows = db
+      .prepare(
+        `SELECT p.id, p.title, p.created_at,
+                users.id as uid, users.name, users.phone, users.avatar_url,
+                users.role, users.verified, users.constituency_id
+         FROM polls p
+         JOIN users ON users.id = p.created_by
+         WHERE p.created_by IN (${placeholders}) AND p.created_at >= ?
+         ORDER BY p.created_at DESC LIMIT 25`
+      )
+      .all(...connectionIds, SINCE);
+    for (const p of pollRows) {
+      items.push({
+        id: `poll-${p.id}`,
+        type: 'new_poll',
+        actor: publicUser({ id: p.uid, name: p.name, phone: p.phone, avatar_url: p.avatar_url, role: p.role, verified: p.verified, constituency_id: p.constituency_id }),
+        verb: 'posted a poll',
+        target_type: 'poll',
+        target_id: p.id,
+        target_url: `/polls`,
+        context_title: p.title,
+        created_at: p.created_at,
+      });
+    }
+  }
+
+  // 6. New posts in the caller's constituency by users they're NOT connected to.
+  // This is the "someone in your ward posted" surface — local discovery without
+  // the People page search.
+  if (req.user.constituency_id) {
+    const exclude = connectionIds.length > 0
+      ? `AND issues.user_id NOT IN (${connectionIds.map(() => '?').join(',')})`
+      : '';
+    const params = [req.user.constituency_id, SINCE, me];
+    if (connectionIds.length > 0) params.push(...connectionIds);
+
+    const localRows = db
+      .prepare(
+        `SELECT issues.id, issues.title, issues.created_at,
+                users.id as uid, users.name, users.phone, users.avatar_url,
+                users.role, users.verified, users.constituency_id
+         FROM issues
+         JOIN users ON users.id = issues.user_id
+         WHERE issues.constituency_id = ?
+           AND issues.created_at >= ?
+           AND issues.user_id != ?
+           ${exclude}
+         ORDER BY issues.created_at DESC LIMIT 25`
+      )
+      .all(...params);
+    for (const i of localRows) {
+      items.push({
+        id: `local-${i.id}`,
+        type: 'local_post',
+        actor: publicUser({ id: i.uid, name: i.name, phone: i.phone, avatar_url: i.avatar_url, role: i.role, verified: i.verified, constituency_id: i.constituency_id }),
+        verb: 'posted in your constituency',
+        target_type: 'issue',
+        target_id: i.id,
+        target_url: `/issues/${i.id}`,
+        context_title: i.title,
+        created_at: i.created_at,
+      });
+    }
+  }
+
+  // Sort newest first and cap at 50
+  items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const capped = items.slice(0, 50);
+
+  res.json({ notifications: capped });
+});
+
+
 router.post('/messages', authRequired, requireVerified, (req, res) => {
   const { to, body } = req.body;
   if (!to || !body || !body.trim()) {

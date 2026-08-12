@@ -6,12 +6,20 @@ export function getToken() {
   return window.localStorage.getItem('civic_token');
 }
 
+function emitAuthChange(user) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('civic:auth-change', { detail: { user } }));
+}
+
 export function setToken(token) {
   if (typeof window !== 'undefined') window.localStorage.setItem('civic_token', token);
 }
 
 export function clearToken() {
-  if (typeof window !== 'undefined') window.localStorage.removeItem('civic_token');
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem('civic_token');
+  window.localStorage.removeItem('civic_user');
+  emitAuthChange(null);
 }
 
 export function getStoredUser() {
@@ -21,7 +29,9 @@ export function getStoredUser() {
 }
 
 export function setStoredUser(user) {
-  if (typeof window !== 'undefined') window.localStorage.setItem('civic_user', JSON.stringify(user));
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem('civic_user', JSON.stringify(user));
+  emitAuthChange(user);
 }
 
 async function request(path, { method = 'GET', body, auth = true, isForm = false } = {}) {
@@ -64,6 +74,7 @@ export const api = {
   createIssue: (payload) => request('/api/issues', { method: 'POST', body: payload }),
   voteIssue: (id) => request(`/api/issues/${id}/vote`, { method: 'POST' }),
   reportIssue: (id, reason) => request(`/api/issues/${id}/report`, { method: 'POST', body: { reason } }),
+  deleteIssue: (id) => request(`/api/issues/${id}`, { method: 'DELETE' }),
   commentIssue: (id, body) => request(`/api/issues/${id}/comments`, { method: 'POST', body: { body } }),
   uploadEvidence: (id, formData) =>
     request(`/api/issues/${id}/evidence`, { method: 'POST', body: formData, isForm: true }),
@@ -93,6 +104,7 @@ export const api = {
     request('/api/social/decline', { method: 'POST', body: { request_id } }),
   pendingRequests: () => request('/api/social/pending'),
   outgoingRequests: () => request('/api/social/outgoing'),
+  notifications: () => request('/api/social/notifications'),
   connections: () => request('/api/social/connections'),
   threads: () => request('/api/social/threads'),
   messages: (withUserId) =>
@@ -102,13 +114,13 @@ export const api = {
 };
 
 export const CATEGORIES = [
-  { value: 'aqi', label: 'AQI / Pollution' },
-  { value: 'education', label: 'Education' },
-  { value: 'roads', label: 'Roads & Infrastructure' },
-  { value: 'electricity_water', label: 'Electricity / Water' },
-  { value: 'governance_corruption', label: 'Governance / Corruption' },
-  { value: 'health', label: 'Health' },
-  { value: 'law_order', label: 'Law & Order' },
+  { value: 'aqi', label: 'AQI / Pollution', icon: '🌫️' },
+  { value: 'education', label: 'Education', icon: '📚' },
+  { value: 'roads', label: 'Roads & Infrastructure', icon: '🛣️' },
+  { value: 'electricity_water', label: 'Electricity / Water', icon: '💡' },
+  { value: 'governance_corruption', label: 'Governance / Corruption', icon: '⚖️' },
+  { value: 'health', label: 'Health', icon: '🏥' },
+  { value: 'law_order', label: 'Law & Order', icon: '🚓' },
 ];
 
 export const SCOPES = [

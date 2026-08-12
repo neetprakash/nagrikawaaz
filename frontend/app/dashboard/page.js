@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, getStoredUser } from '../../lib/api';
 import PostComposer from '../../components/PostComposer';
-import FeedTabs from '../../components/FeedTabs';
 import FeedFilters from '../../components/FeedFilters';
 import Sidebar from '../../components/Sidebar';
 import IssueFeedCard from '../../components/IssueFeedCard';
@@ -12,7 +11,6 @@ import PollFeedCard from '../../components/PollFeedCard';
 
 export default function DashboardPage() {
   const [user, setUser] = useState(null);
-  const [mode, setMode] = useState('foryou'); // foryou | trending | latest
   const [scope, setScope] = useState('');
   const [category, setCategory] = useState('');
   const [feed, setFeed] = useState(null);
@@ -25,14 +23,13 @@ export default function DashboardPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, scope, category]);
+  }, [scope, category]);
 
   async function load() {
     setError('');
     try {
-      const sort = mode === 'trending' ? 'votes' : 'recent';
-      const issueParams = { status: 'active', sort };
-      if (mode === 'foryou' && getStoredUser()) issueParams.feed = 'foryou';
+      // Unified timeline — all active posts sorted by most recent.
+      const issueParams = { status: 'active', sort: 'recent' };
       if (scope) issueParams.scope = scope;
       if (category) issueParams.category = category;
 
@@ -49,14 +46,7 @@ export default function DashboardPage() {
         ...pollsRes.polls.map((p) => ({ type: 'poll', data: p, created_at: p.created_at })),
       ];
 
-      items.sort((a, b) => {
-        if (mode === 'trending') {
-          const va = a.type === 'issue' ? a.data.vote_count : 0;
-          const vb = b.type === 'issue' ? b.data.vote_count : 0;
-          if (va !== vb) return vb - va;
-        }
-        return new Date(b.created_at) - new Date(a.created_at);
-      });
+      items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       setFeed(items);
     } catch (err) {
@@ -81,14 +71,12 @@ export default function DashboardPage() {
           <PostComposer user={user} />
         </div>
 
-        <FeedTabs mode={mode} setMode={setMode} />
-
         <FeedFilters
           scope={scope}
           setScope={setScope}
           category={category}
           setCategory={setCategory}
-          sort={mode === 'trending' ? 'votes' : 'recent'}
+          sort="recent"
           setSort={() => {}}
           hideSort
         />
@@ -105,7 +93,15 @@ export default function DashboardPage() {
         <div className="space-y-4">
           {feed?.map((item) =>
             item.type === 'issue' ? (
-              <IssueFeedCard key={`issue-${item.data.id}`} issue={item.data} />
+              <IssueFeedCard
+                key={`issue-${item.data.id}`}
+                issue={item.data}
+                onDeleted={(id) =>
+                  setFeed((f) =>
+                    f ? f.filter((it) => !(it.type === 'issue' && it.data.id === id)) : f
+                  )
+                }
+              />
             ) : (
               <PollFeedCard key={`poll-${item.data.id}`} poll={item.data} />
             )

@@ -76,7 +76,29 @@ export default function ThreadPage() {
         if (msg.type === 'message') {
           const m = msg.message;
           if (m.sender_id === otherId || m.recipient_id === otherId) {
-            setMessages((prev) => (prev.some((p) => p.id === m.id) ? prev : [...prev, m]));
+            setMessages((prev) => {
+              // If the canonical row is already in state, nothing to do.
+              if (prev.some((p) => p.id === m.id)) return prev;
+              // Otherwise: replace the most recent matching temp row (the optimistic
+              // one we appended on send) with the canonical row, OR append if no match.
+              const tempIdx = [...prev]
+                .reverse()
+                .findIndex(
+                  (p) =>
+                    typeof p.id === 'string' &&
+                    p.id.startsWith('tmp-') &&
+                    p.sender_id === m.sender_id &&
+                    p.recipient_id === m.recipient_id &&
+                    p.body === m.body
+                );
+              if (tempIdx >= 0) {
+                const realIdx = prev.length - 1 - tempIdx;
+                const next = prev.slice();
+                next[realIdx] = m;
+                return next;
+              }
+              return [...prev, m];
+            });
           }
         }
       } catch {

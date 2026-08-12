@@ -132,7 +132,12 @@ const LIST_SELECT = `
          constituencies.state as state,
          constituencies.mp_name as mp_name,
          (SELECT COUNT(*) FROM comments WHERE comments.issue_id = issues.id) as comment_count,
-         (SELECT COUNT(*) FROM evidence WHERE evidence.issue_id = issues.id) as evidence_count
+         (SELECT COUNT(*) FROM evidence WHERE evidence.issue_id = issues.id) as evidence_count,
+         COALESCE(
+           (SELECT json_group_array(json_object('id', e.id, 'file_url', e.file_url, 'file_type', e.file_type))
+            FROM evidence e WHERE e.issue_id = issues.id),
+           '[]'
+         ) as evidence
   FROM issues
   JOIN users ON users.id = issues.user_id
   LEFT JOIN constituencies ON constituencies.id = issues.constituency_id
@@ -204,7 +209,7 @@ router.get('/', optionalAuth, (req, res) => {
 
   res.json({
     issues: issues.map((i) => ({
-      ...withAuthorPrivacy(i, req.user),
+      ...withParsedEvidence(withAuthorPrivacy(i, req.user)),
       has_voted: userVotedIds.has(i.id),
       has_reported: userReportedIds.has(i.id),
     })),
@@ -212,10 +217,9 @@ router.get('/', optionalAuth, (req, res) => {
 });
 
 router.get('/:id', optionalAuth, (req, res) => {
-  const issue = db.prepare(`${LIST_SELECT} WHERE issues.id = ?`).get(req.params.id);
-  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  const issueRow = db.prepare(`${LIST_SELECT} WHERE issues.id = ?`).get(req.params.id);
+  if (!issueRow) return res.status(404).json({ error: 'Issue not found' });
 
-  const evidence = db.prepare('SELECT * FROM evidence WHERE issue_id = ?').all(issue.id);
   const comments = db
     .prepare(
       `SELECT comments.*, users.name as author_name, users.avatar_url as author_avatar_url
@@ -223,7 +227,7 @@ router.get('/:id', optionalAuth, (req, res) => {
        JOIN users ON users.id = comments.user_id
        WHERE issue_id = ? ORDER BY comments.created_at ASC`
     )
-    .all(issue.id);
+    .all(issueRow.id);
   const responses = db
     .prepare(
       `SELECT official_responses.*, officials.designation, officials.level
@@ -231,21 +235,23 @@ router.get('/:id', optionalAuth, (req, res) => {
        JOIN officials ON officials.id = official_responses.official_id
        WHERE issue_id = ? ORDER BY official_responses.created_at ASC`
     )
-    .all(issue.id);
+    .all(issueRow.id);
   const escalations = db
     .prepare('SELECT * FROM escalation_log WHERE issue_id = ? ORDER BY notified_at ASC')
-    .all(issue.id);
+    .all(issueRow.id);
 
   const hasVoted = req.user
-    ? !!db.prepare('SELECT 1 FROM votes WHERE issue_id = ? AND user_id = ?').get(issue.id, req.user.id)
+    ? !!db.prepare('SELECT 1 FROM votes WHERE issue_id = ? AND user_id = ?').get(issueRow.id, req.user.id)
     : false;
   const hasReported = req.user
-    ? !!db.prepare('SELECT 1 FROM reports WHERE issue_id = ? AND user_id = ?').get(issue.id, req.user.id)
+    ? !!db.prepare('SELECT 1 FROM reports WHERE issue_id = ? AND user_id = ?').get(issueRow.id, req.user.id)
     : false;
 
+  const issue = withParsedEvidence(withAuthorPrivacy(issueRow, req.user));
   res.json({
-    issue: { ...withAuthorPrivacy(issue, req.user), has_voted: hasVoted, has_reported: hasReported },
-    evidence,
+    issue: { ...issue, has_voted: hasVoted, has_reported: hasReported },
+    // Keep `evidence` as a top-level alias for older clients that read it from here.
+    evidence: issue.evidence,
     comments,
     responses,
     escalations,
@@ -261,7 +267,7 @@ router.post('/:id/vote', authRequired, requireVerified, (req, res) => {
     return res.status(400).json({ error: 'This issue is not currently open for voting' });
   }
 
-  if (['ward', 'district'].includes(issue.scope)) {
+  if (['ward', 'district'].includes(issue.scope) && issue.constituency_id) {
     if (!req.user.constituency_id || req.user.constituency_id !== issue.constituency_id) {
       return res.status(403).json({ error: 'Only users from the affected area can vote on this issue' });
     }
@@ -294,12 +300,60 @@ router.post('/:id/comments', authRequired, requireVerified, (req, res) => {
   res.status(201).json({ message: 'Comment added' });
 });
 
+// Author-only delete. Removes the issue row plus its votes, comments, evidence
+// files, reports, official responses, and escalation log. Evidence files are
+// unlinked from disk too (best effort — file already gone is fine).
+router.delete('/:id', authRequired, (req, res) => {
+  const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(req.params.id);
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  if (issue.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'You can only delete your own issues' });
+  }
+
+  const evidenceRows = db.prepare('SELECT file_url FROM evidence WHERE issue_id = ?').all(issue.id);
+  const fs = require('fs');
+  const pathLocal = require('path');
+
+  const wipe = db.transaction(() => {
+    db.prepare('DELETE FROM votes WHERE issue_id = ?').run(issue.id);
+    db.prepare('DELETE FROM comments WHERE issue_id = ?').run(issue.id);
+    db.prepare('DELETE FROM evidence WHERE issue_id = ?').run(issue.id);
+    db.prepare('DELETE FROM reports WHERE issue_id = ?').run(issue.id);
+    db.prepare('DELETE FROM official_responses WHERE issue_id = ?').run(issue.id);
+    db.prepare('DELETE FROM escalation_log WHERE issue_id = ?').run(issue.id);
+    db.prepare('DELETE FROM issues WHERE id = ?').run(issue.id);
+  });
+  wipe();
+
+  for (const e of evidenceRows) {
+    if (e.file_url && e.file_url.startsWith('/uploads/')) {
+      const p = pathLocal.join(__dirname, '..', e.file_url.replace(/^\//, ''));
+      try { fs.unlinkSync(p); } catch {}
+    }
+  }
+
+  res.json({ message: 'Issue deleted.', id: issue.id });
+});
+
 function withAuthorPrivacy(issue, requestingUser) {
   if (issue.anonymous && (!requestingUser || requestingUser.id !== issue.user_id)) {
     const { user_id, author_name, author_avatar_url, ...rest } = issue;
     return { ...rest, author_name: 'Anonymous', author_avatar_url: null };
   }
   return issue;
+}
+
+// LIST_SELECT returns the `evidence` column as a JSON string produced by
+// SQLite's json_group_array. Parse it for the API so the client gets a real
+// array, not a stringified blob.
+function withParsedEvidence(row) {
+  if (!row) return row;
+  const raw = row.evidence;
+  let parsed = [];
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch { parsed = []; }
+  }
+  return { ...row, evidence: parsed };
 }
 
 module.exports = router;

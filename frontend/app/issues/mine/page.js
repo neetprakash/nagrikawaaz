@@ -28,6 +28,18 @@ export default function MyIssuesPage() {
     }
   }
 
+  async function remove(id) {
+    if (!window.confirm('Delete this issue? This cannot be undone — votes, comments, and evidence will be removed.')) {
+      return;
+    }
+    try {
+      await api.deleteIssue(id);
+      setIssues((arr) => arr.filter((i) => i.id !== id));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <div className="max-w-xl mx-auto">
       <h1 className="text-2xl font-bold text-navy mb-1">My Issues</h1>
@@ -54,9 +66,17 @@ export default function MyIssuesPage() {
                 {timeAgo(issue.created_at)}
               </p>
               <p className="text-sm mt-2 text-gray-700">{issue.description}</p>
-              {issue.status === 'active' && (
-                <p className="text-xs text-gray-500 mt-2">▲ {issue.vote_count} votes · {issue.comment_count} comments</p>
-              )}
+              <div className="flex items-center justify-between mt-3">
+                {issue.status === 'active' ? (
+                  <p className="text-xs text-gray-500">▲ {issue.vote_count} votes · {issue.comment_count} comments</p>
+                ) : <span />}
+                <button
+                  onClick={() => remove(issue.id)}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
             </div>
           );
         })}

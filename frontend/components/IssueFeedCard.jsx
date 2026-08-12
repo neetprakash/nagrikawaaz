@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Avatar from './Avatar';
+import EvidenceCarousel from './EvidenceCarousel';
 import { api, CATEGORIES, getStoredUser, API_URL } from '../lib/api';
 import { timeAgo } from '../lib/time';
 
@@ -15,7 +16,7 @@ function absoluteAvatarUrl(url) {
   return `${API_URL}${url}`;
 }
 
-export default function IssueFeedCard({ issue: initial }) {
+export default function IssueFeedCard({ issue: initial, onDeleted }) {
   const [issue, setIssue] = useState(initial);
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState('');
@@ -65,6 +66,23 @@ export default function IssueFeedCard({ issue: initial }) {
       setShowMenu(false);
     }
   }
+
+  async function deleteOwn() {
+    if (!window.confirm('Delete this issue? This cannot be undone — votes, comments, and evidence will be removed.')) {
+      return;
+    }
+    try {
+      await api.deleteIssue(issue.id);
+      onDeleted?.(issue.id);
+    } catch (err) {
+      setVoteError({ text: err.message });
+    } finally {
+      setShowMenu(false);
+    }
+  }
+
+  const me = getStoredUser();
+  const isAuthor = me && issue.user_id && me.id === issue.user_id;
 
   async function toggleComments() {
     setShowComments((s) => !s);
@@ -121,14 +139,23 @@ export default function IssueFeedCard({ issue: initial }) {
             ⋯
           </button>
           {showMenu && (
-            <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-md text-sm w-40 z-20 overflow-hidden">
-              <button
-                onClick={report}
-                disabled={reported}
-                className="w-full text-left px-3 py-2 hover:bg-gray-50 text-red-600 disabled:text-gray-400"
-              >
-                {reported ? '✅ Reported' : '🚩 Report post'}
-              </button>
+            <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-md text-sm w-44 z-20 overflow-hidden">
+              {isAuthor ? (
+                <button
+                  onClick={deleteOwn}
+                  className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 border-b border-gray-100"
+                >
+                  🗑️ Delete issue
+                </button>
+              ) : (
+                <button
+                  onClick={report}
+                  disabled={reported}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-50 text-red-600 disabled:text-gray-400"
+                >
+                  {reported ? '✅ Reported' : '🚩 Report post'}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -153,19 +180,35 @@ export default function IssueFeedCard({ issue: initial }) {
         </button>
       )}
 
-      {issue.evidence_count > 0 && (
+      {issue.evidence && issue.evidence.length > 0 ? (
+        <EvidenceCarousel items={issue.evidence} />
+      ) : issue.evidence_count > 0 ? (
         <Link
           href={`/issues/${issue.id}`}
           className="mt-3 flex items-center gap-1 text-xs text-navy bg-blue-50 rounded-lg px-2 py-1.5 w-fit"
         >
           📎 {issue.evidence_count} evidence file{issue.evidence_count > 1 ? 's' : ''} attached
         </Link>
-      )}
+      ) : null}
 
-      {/* Status strip */}
+      {/* Status strip — pending means "no official response yet", not a moderation gate.
+          Relabel so it's clearly a response-availability status. */}
       <div className="mt-3 flex items-center gap-2 text-xs">
-        <span className={`badge status-${issue.response_status}`}>
-          {STATUS_ICON[issue.response_status]} {issue.response_status.replace('_', ' ')}
+        <span
+          className={`badge status-${issue.response_status}`}
+          title={
+            issue.response_status === 'pending'
+              ? 'No official has responded yet'
+              : issue.response_status === 'under_review'
+              ? 'Tagged official is reviewing'
+              : issue.response_status === 'action_taken'
+              ? 'Official action recorded'
+              : 'Official declined to act'
+          }
+        >
+          {issue.response_status === 'pending'
+            ? '⏳ Awaiting official response'
+            : `${STATUS_ICON[issue.response_status]} ${issue.response_status.replace('_', ' ')}`}
         </span>
       </div>
 

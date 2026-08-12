@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, CATEGORIES } from '../../../lib/api';
+import EvidenceCarousel from '../../../components/EvidenceCarousel';
 
 const STATUS_ICON = {
   pending: '⏳',
@@ -106,15 +107,7 @@ export default function IssueDetailPage() {
           <p className="text-sm text-gray-500">Affects: {issue.affected_group}</p>
         )}
 
-        {evidence?.length > 0 && (
-          <div className="mt-3 flex gap-2 flex-wrap">
-            {evidence.map((ev) => (
-              <a key={ev.id} href={ev.file_url} target="_blank" rel="noreferrer" className="text-sm text-navy underline">
-                View evidence
-              </a>
-            ))}
-          </div>
-        )}
+        {evidence?.length > 0 && <EvidenceCarousel items={evidence} />}
 
         <div className="flex items-center gap-3 mt-4">
           <button onClick={vote} disabled={issue.has_voted} className="btn-primary disabled:opacity-60">

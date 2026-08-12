@@ -1,9 +1,79 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, CATEGORIES, SCOPES } from '../../../lib/api';
+
+const SCOPE_ICONS = {
+  ward: '🏘️',
+  district: '🏙️',
+  state: '🗺️',
+  national: '🇮🇳',
+};
+
+function Dropdown({ value, onChange, options, renderRow, renderButton }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full input flex items-center gap-2 text-left ${
+          open ? 'ring-2 ring-navy/40' : ''
+        }`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        {renderButton ? renderButton(selected) : selected?.label || '—'}
+        <span className="ml-auto text-gray-400">▾</span>
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"
+        >
+          {options.map((o) => (
+            <li key={o.value}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 hover:bg-gray-50 text-sm flex items-center gap-2 ${
+                  o.value === value ? 'bg-navy/5' : ''
+                }`}
+              >
+                {renderRow ? renderRow(o, o.value === value) : o.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function NewIssuePage() {
   const router = useRouter();
@@ -16,7 +86,7 @@ export default function NewIssuePage() {
     affected_group: '',
     anonymous: false,
   });
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -31,7 +101,7 @@ export default function NewIssuePage() {
     setLoading(true);
     try {
       const res = await api.createIssue(form);
-      if (file) {
+      for (const file of files) {
         const fd = new FormData();
         fd.append('file', file);
         await api.uploadEvidence(res.issue_id, fd);
@@ -60,19 +130,45 @@ export default function NewIssuePage() {
 
       <form onSubmit={submit} className="space-y-3">
         <Field label="Issue category">
-          <select className="input" value={form.category} onChange={(e) => update('category', e.target.value)}>
-            {CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
+          <Dropdown
+            value={form.category}
+            onChange={(v) => update('category', v)}
+            options={CATEGORIES}
+            renderButton={(c) => (
+              <>
+                <span>{c?.icon || '✨'}</span>
+                <span>{c?.label || '—'}</span>
+              </>
+            )}
+            renderRow={(c, active) => (
+              <>
+                <span>{c.icon}</span>
+                <span className={active ? 'font-semibold' : ''}>{c.label}</span>
+                {active && <span className="ml-auto text-navy">✓</span>}
+              </>
+            )}
+          />
         </Field>
 
         <Field label="Location scope">
-          <select className="input" value={form.scope} onChange={(e) => update('scope', e.target.value)}>
-            {SCOPES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
+          <Dropdown
+            value={form.scope}
+            onChange={(v) => update('scope', v)}
+            options={SCOPES}
+            renderButton={(s) => (
+              <>
+                <span>{SCOPE_ICONS[s?.value] || '🌐'}</span>
+                <span>{s?.label || '—'}</span>
+              </>
+            )}
+            renderRow={(s, active) => (
+              <>
+                <span>{SCOPE_ICONS[s.value] || '🌐'}</span>
+                <span className={active ? 'font-semibold' : ''}>{s.label}</span>
+                {active && <span className="ml-auto text-navy">✓</span>}
+              </>
+            )}
+          />
         </Field>
 
         <Field label="Title">
@@ -97,8 +193,21 @@ export default function NewIssuePage() {
           <input className="input" value={form.affected_group} onChange={(e) => update('affected_group', e.target.value)} />
         </Field>
 
-        <Field label="Evidence (photo/document, optional)">
-          <input type="file" className="input" onChange={(e) => setFile(e.target.files[0])} />
+        <Field label="Evidence (photos / documents, optional — multiple allowed)">
+          <input
+            type="file"
+            className="input"
+            multiple
+            accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain"
+            onChange={(e) => setFiles(Array.from(e.target.files || []))}
+          />
+          {files.length > 0 && (
+            <ul className="mt-1 text-xs text-gray-600 space-y-0.5">
+              {files.map((f, i) => (
+                <li key={i}>📎 {f.name}</li>
+              ))}
+            </ul>
+          )}
         </Field>
 
         <label className="flex items-center gap-2 text-sm">

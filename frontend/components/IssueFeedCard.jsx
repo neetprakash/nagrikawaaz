@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Avatar from './Avatar';
 import EvidenceCarousel from './EvidenceCarousel';
+import EscalationProgressBar from './EscalationProgressBar';
 import { api, CATEGORIES, getStoredUser, API_URL } from '../lib/api';
 import { timeAgo } from '../lib/time';
 
@@ -210,6 +211,15 @@ export default function IssueFeedCard({ issue: initial, onDeleted }) {
             ? '⏳ Awaiting official response'
             : `${STATUS_ICON[issue.response_status]} ${issue.response_status.replace('_', ' ')}`}
         </span>
+      </div>
+
+      {/* Escalation progress nudge */}
+      <div className="mt-2">
+        <EscalationProgressBar
+          escalationLevel={issue.escalation_level}
+          voteCount={issue.vote_count}
+          compact
+        />
       </div>
 
       {/* Action bar */}

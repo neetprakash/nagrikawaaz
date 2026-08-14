@@ -156,7 +156,19 @@ router.get('/mine', authRequired, (req, res) => {
 // constituency with high-support issues so a logged-in citizen's default feed isn't empty
 // just because their local area is quiet yet.
 router.get('/', optionalAuth, (req, res) => {
-  const { scope, category, constituency_id, state, status = 'active', sort = 'recent', feed, limit } = req.query;
+  const {
+    scope,
+    category,
+    constituency_id,
+    state,
+    exclude_state,
+    response_status,
+    search,
+    status = 'active',
+    sort = 'recent',
+    feed,
+    limit,
+  } = req.query;
 
   let query = `${LIST_SELECT} WHERE issues.status = ?`;
   const params = [status];
@@ -176,6 +188,18 @@ router.get('/', optionalAuth, (req, res) => {
   if (state) {
     query += ' AND constituencies.state = ?';
     params.push(state);
+  }
+  if (exclude_state) {
+    query += ' AND (constituencies.state IS NULL OR constituencies.state != ?)';
+    params.push(exclude_state);
+  }
+  if (response_status) {
+    query += ' AND issues.response_status = ?';
+    params.push(response_status);
+  }
+  if (search) {
+    query += ' AND (issues.title LIKE ? OR issues.description LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`);
   }
 
   if (feed === 'foryou' && req.user?.constituency_id) {

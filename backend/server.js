@@ -13,6 +13,7 @@ const moderationRoutes = require('./routes/moderation');
 const officialRoutes = require('./routes/officials');
 const pollRoutes = require('./routes/polls');
 const socialRoutes = require('./routes/social');
+const gamificationRoutes = require('./routes/gamification');
 const { attachWebSocket } = require('./ws');
 
 const app = express();
@@ -32,6 +33,7 @@ app.use('/api/moderation', moderationRoutes);
 app.use('/api/officials', officialRoutes);
 app.use('/api/social', socialRoutes);
 app.use('/api', pollRoutes); // /api/polls, /api/petitions
+app.use('/api/gamification', gamificationRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 // eslint-disable-next-line no-unused-vars

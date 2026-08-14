@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Avatar from '../../components/Avatar';
+import BadgeGrid from '../../components/BadgeGrid';
 import { api, getStoredUser, setStoredUser, setToken } from '../../lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -25,6 +27,7 @@ export default function ProfilePage() {
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [connections, setConnections] = useState([]);
+  const [badges, setBadges] = useState(null);
 
   useEffect(() => {
     if (!getStoredUser()) {
@@ -53,6 +56,11 @@ export default function ProfilePage() {
         setConnections(connRes.connections || []);
       } catch {
         // ignore — connections list is a nice-to-have on the profile page
+      }
+      try {
+        setBadges(await api.myBadges());
+      } catch {
+        setBadges(null);
       }
     } catch (err) {
       setError(err.message);
@@ -216,6 +224,48 @@ export default function ProfilePage() {
         <Stat label="Issues posted" value={stats.issues_posted} />
         <Stat label="Posts supported" value={stats.votes_cast} />
         <Stat label="Comments" value={stats.comments_made} />
+      </div>
+
+      {badges && (
+        <div className="card bg-gradient-to-br from-orange-50 to-white">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h2 className="font-semibold flex items-center gap-1.5">🔥 Civic Streak</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                {badges.stats.current_streak_weeks > 0 ? (
+                  <>
+                    <b className="text-orange-600">{badges.stats.current_streak_weeks}-week</b> streak going —
+                    keep raising, supporting, or commenting weekly to extend it.
+                  </>
+                ) : (
+                  'No active streak — vote, comment, or post this week to start one.'
+                )}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Longest streak: {badges.stats.longest_streak_weeks} week{badges.stats.longest_streak_weeks !== 1 ? 's' : ''}
+              </p>
+            </div>
+            {badges.rank_badge && (
+              <div className="text-center bg-white border border-gray-200 rounded-lg px-3 py-2">
+                <div className="text-2xl">{badges.rank_badge.icon}</div>
+                <div className="text-xs font-semibold text-navy">{badges.rank_badge.name}</div>
+                <div className="text-[11px] text-gray-400">#{badges.rank_badge.rank} this month</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold">Badges</h2>
+          <Link href="/leaderboard" className="text-xs text-navy underline">View leaderboard →</Link>
+        </div>
+        {badges ? (
+          <BadgeGrid earned={badges.earned} locked={badges.locked} />
+        ) : (
+          <p className="text-sm text-gray-400">Loading badges…</p>
+        )}
       </div>
 
       {connections.length > 0 && (

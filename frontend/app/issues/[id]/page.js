@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, CATEGORIES } from '../../../lib/api';
 import EvidenceCarousel from '../../../components/EvidenceCarousel';
+import EscalationProgressBar from '../../../components/EscalationProgressBar';
 
 const STATUS_ICON = {
   pending: '⏳',
@@ -118,6 +119,10 @@ export default function IssueDetailPage() {
           </span>
         </div>
         {voteMsg && <p className="text-sm text-gray-600 mt-2">{voteMsg}</p>}
+
+        <div className="mt-4 pt-4 border-t">
+          <EscalationProgressBar escalationLevel={issue.escalation_level} voteCount={issue.vote_count} />
+        </div>
       </div>
 
       {escalations?.length > 0 && (

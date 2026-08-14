@@ -95,6 +95,13 @@ export const api = {
   createPoll: (payload) => request('/api/polls', { method: 'POST', body: payload }),
   votePoll: (id, option_index) => request(`/api/polls/${id}/vote`, { method: 'POST', body: { option_index } }),
 
+  myStreak: () => request('/api/gamification/streak'),
+  myBadges: () => request('/api/gamification/badges/me'),
+  leaderboard: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/gamification/leaderboard${qs ? `?${qs}` : ''}`, { auth: true });
+  },
+
   searchUsers: (q) =>
     request(`/api/social/search?q=${encodeURIComponent(q)}`, { auth: true }),
   connect: (user_id) => request('/api/social/connect', { method: 'POST', body: { user_id } }),

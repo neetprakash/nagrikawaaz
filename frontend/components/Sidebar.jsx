@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, CATEGORIES } from '../lib/api';
+import { api, CATEGORIES, getStoredUser } from '../lib/api';
 
 const NEXT_THRESHOLD = { ward: 1000, city: 10000, state: 50000, national: null };
 const LEVEL_LABEL = { ward: 'Locality', city: 'City', state: 'State', national: 'Country' };
@@ -11,6 +11,8 @@ export default function Sidebar() {
   const [trending, setTrending] = useState(null);
   const [latest, setLatest] = useState(null);
   const [closeToEscalation, setCloseToEscalation] = useState(null);
+  const [streak, setStreak] = useState(null);
+  const [leaderboard, setLeaderboard] = useState(null);
 
   useEffect(() => {
     load();
@@ -37,10 +39,61 @@ export default function Sidebar() {
       setLatest([]);
       setCloseToEscalation([]);
     }
+
+    if (getStoredUser()) {
+      try {
+        setStreak(await api.myStreak());
+      } catch {
+        setStreak(null);
+      }
+      try {
+        setLeaderboard(await api.leaderboard({}));
+      } catch {
+        setLeaderboard(null);
+      }
+    }
   }
 
   return (
     <aside className="space-y-4 w-full lg:w-72 shrink-0">
+      {streak && (
+        <div className="card bg-gradient-to-br from-orange-50 to-white">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🔥</span>
+            <div>
+              <p className="text-sm font-semibold text-navy">
+                {streak.current_streak_weeks > 0
+                  ? `${streak.current_streak_weeks}-week civic streak`
+                  : 'No streak yet this week'}
+              </p>
+              <p className="text-xs text-gray-500">
+                {streak.current_streak_weeks > 0
+                  ? 'Vote, comment, or post to keep it alive'
+                  : 'Support or post something to start one'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {leaderboard?.leaderboard?.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm text-navy">🏆 This Month's Watchdogs</h3>
+            <Link href="/leaderboard" className="text-xs text-navy underline">See all</Link>
+          </div>
+          <div className="space-y-2">
+            {leaderboard.leaderboard.slice(0, 3).map((row) => (
+              <div key={row.id} className="flex items-center gap-2 text-sm">
+                <span className="w-5 text-center text-gray-400 font-medium">#{row.rank}</span>
+                <span className="flex-1 truncate">{row.name}</span>
+                {row.badge && <span title={row.badge.name}>{row.badge.icon}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Widget title="🔥 Trending Now" items={trending} emptyText="Nothing trending yet.">
         {(issue) => (
           <MiniRow key={issue.id} issue={issue} metric={`${issue.vote_count} 👍`} />
